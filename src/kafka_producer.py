@@ -1,43 +1,53 @@
 import json
-import time
 import logging
+import time
 from kafka import KafkaProducer
+from kafka.errors import KafkaError
 from config import Config
 
 logger = logging.getLogger(__name__)
 
+
 class ReliableKafkaProducer:
 
-    def __init__(self):
-        self.producer = KafkaProducer(
-            bootstrap_servers=Config.KAFKA_BOOTSTRAP_SERVERS,
-            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-            key_serializer=lambda k: str(k).encode("utf-8"),
-            retries=0
-        )
+    def __init__(self, max_retries=10, delay=3):
+        retries = 0
 
-    def send(self, key, value):
-        retry_delay = 1
-
-        for attempt in range(Config.MAX_RETRIES):
+        while retries < max_retries:
             try:
-                future = self.producer.send(
-                    Config.KAFKA_TOPIC,
-                    key=key,
-                    value=value
+                self.producer = KafkaProducer(
+                    bootstrap_servers=Config.KAFKA_BOOTSTRAP_SERVERS,
+                    value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+                    retries=5,
+                    acks="all",
+                    linger_ms=5,
                 )
-                future.get(timeout=10)
-                logger.info(f"Event published: {value['event_id']}")
+                logger.info("Connected to Kafka")
                 return
 
             except Exception as e:
-                logger.warning(f"Retry {attempt+1} failed: {e}")
-                time.sleep(retry_delay)
-                retry_delay *= 2
+                retries += 1
+                logger.warning(
+                    f"Kafka connection failed (attempt {retries}/{max_retries}): {e}"
+                )
+                time.sleep(delay)
 
-        logger.error("Max retries exceeded")
-        raise Exception("Kafka publish failed")
+        raise Exception("Failed to connect to Kafka after retries")
+
+    def send(self, key, value):
+        try:
+            future = self.producer.send(
+                Config.KAFKA_TOPIC,
+                key=str(key).encode("utf-8"),
+                value=value,
+            )
+            record_metadata = future.get(timeout=10)
+            logger.info(f"Event published: {value['event_id']}")
+
+        except KafkaError as e:
+            logger.error(f"Kafka send failed: {e}")
 
     def close(self):
         self.producer.flush()
         self.producer.close()
+        logger.info("Kafka producer closed")
