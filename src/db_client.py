@@ -1,3 +1,4 @@
+import time
 import mysql.connector
 import logging
 from config import Config
@@ -8,33 +9,46 @@ class MySQLClient:
     def __init__(self):
         self.connection = None
 
-    def connect(self):
-        self.connection = mysql.connector.connect(
-            host=Config.DB_HOST,
-            port=Config.DB_PORT,
-            user=Config.DB_USER,
-            password=Config.DB_PASSWORD,
-            database=Config.DB_NAME,
-        )
-        logger.info("Connected to MySQL")
+    def connect(self, max_retries=10, delay=3):
+        retries = 0
 
-    def fetch_changes(self, last_updated, last_id):
+        while retries < max_retries:
+            try:
+                self.connection = mysql.connector.connect(
+                    host=Config.DB_HOST,
+                    port=Config.DB_PORT,
+                    user=Config.DB_USER,
+                    password=Config.DB_PASSWORD,
+                    database=Config.DB_NAME,
+                )
+                logger.info("Connected to MySQL")
+                return
+
+            except mysql.connector.Error as e:
+                retries += 1
+                logger.warning(
+                    f"MySQL connection failed (attempt {retries}/{max_retries}): {e}"
+                )
+                time.sleep(delay)
+
+        raise Exception("Failed to connect to MySQL after retries")
+
+    def fetch_changes(self, last_updated):
         cursor = self.connection.cursor(dictionary=True)
 
         if last_updated:
             query = f"""
-            SELECT *
-            FROM {Config.TABLE_NAME}
-            WHERE last_updated > %s
-            OR (last_updated = %s AND id > %s)
-            ORDER BY last_updated, id
+                SELECT *
+                FROM {Config.TABLE_NAME}
+                WHERE last_updated > %s
+                ORDER BY last_updated ASC, id ASC
             """
-            cursor.execute(query, (last_updated, last_updated, last_id))
+            cursor.execute(query, (last_updated,))
         else:
             query = f"""
-            SELECT *
-            FROM {Config.TABLE_NAME}
-            ORDER BY last_updated, id
+                SELECT *
+                FROM {Config.TABLE_NAME}
+                ORDER BY last_updated ASC, id ASC
             """
             cursor.execute(query)
 
