@@ -3,7 +3,7 @@ import logging
 import time
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
-from config import Config
+from src.config import Config   # ✅ FIXED
 
 logger = logging.getLogger(__name__)
 
